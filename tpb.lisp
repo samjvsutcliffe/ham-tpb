@@ -7,8 +7,8 @@
 (ql:quickload "cl-mpm")
 (asdf:compile-system :cl-mpm :force T)
 (ql:quickload "cl-mpm/examples/slump")
-(asdf:compile-system :cl-mpm/examples/slump :force T)
-(in-package :cl-mpm/examples/slump)
+(asdf:compile-system :cl-mpm/examples/tpb :force T)
+(in-package :cl-mpm/examples/tpb)
 
 (defun rectangle-sdf (position size)
   (lambda (pos)
