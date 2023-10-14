@@ -5,9 +5,9 @@
 (setf *features* (delete :cl-mpm-pic *features*))
 (ql:quickload "magicl")
 (ql:quickload "cl-mpm")
-(asdf:compile-system :cl-mpm :force T)
-(ql:quickload "cl-mpm/examples/slump")
-(asdf:compile-system :cl-mpm/examples/tpb :force T)
+;(asdf:compile-system :cl-mpm :force T)
+(ql:quickload "cl-mpm/examples/tpb")
+;(asdf:compile-system :cl-mpm/examples/tpb :force T)
 (in-package :cl-mpm/examples/tpb)
 
 (defun rectangle-sdf (position size)
@@ -374,7 +374,7 @@
   ;;   (defparameter *sim* (setup-test-column '(16 16) '(8 8)  '(0 0) *refine* mps-per-dim)))
   ;; (defparameter *sim* (setup-test-column '(1 1 1) '(1 1 1) 1 1))
 
-  (let* ((mesh-size (/ 0.025 4))
+  (let* ((mesh-size (/ 0.025 1))
          (mps-per-cell 2)
          (shelf-height 0.100d0)
          ;(shelf-length 0.55d0)
@@ -464,6 +464,12 @@
   (defparameter *run-sim* t)
   (defparameter *t* 0)
   (defparameter *sim-step* 0))
+
+  (defparameter *data-force* '())
+  (defparameter *data-displacement* '(0d0))
+  (defparameter *data-load* '(0d0))
+  (defparameter *data-node-load* '(0d0))
+(defparameter *target-displacement* 0d0)
 
 (defun run ()
   (vgplot:close-all-plots)
