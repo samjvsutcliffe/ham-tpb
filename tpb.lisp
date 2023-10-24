@@ -7,6 +7,7 @@
 (ql:quickload "cl-mpm")
 ;(asdf:compile-system :cl-mpm :force T)
 (ql:quickload "cl-mpm/examples/tpb")
+(ql:quickload :cl-mpm/mpi)
 ;(asdf:compile-system :cl-mpm/examples/tpb :force T)
 (in-package :cl-mpm/examples/tpb)
 
@@ -121,6 +122,7 @@
 
 ;(defparameter *tip-velocity* -0.02d-3)
 (defparameter *tip-velocity* -0.000d-3)
+
 (defun setup-test-column (size block-size offset &optional (e-scale 1) (mp-scale 1))
   (let* ((sim (cl-mpm/setup::make-block
                (/ 1d0 e-scale)
@@ -128,6 +130,7 @@
                #'cl-mpm/shape-function:make-shape-function-bspline
                ;; 'cl-mpm::mpm-sim-usf
                'cl-mpm/damage::mpm-sim-damage
+               ;; 'cl-mpm/mpi::mpm-si
                ))
          (h (cl-mpm/mesh:mesh-resolution (cl-mpm:sim-mesh sim)))
          (h-x (/ h 1d0))
@@ -178,13 +181,14 @@
                            ) block-size)
                  density
                  'cl-mpm/particle::particle-concrete
-                 :E 20d9
-                 :nu 0.20d0
-                 :fracture-energy 9d0
-                 :initiation-stress (* 2.4d6 1d0)
-                 :critical-damage 0.9d0
-                 :local-length 5d-2
-                 :local-length-damaged 5d-2
+                 :E 15d9
+                 :nu 0.15d0
+                 ;; :elastic-approxmation :
+                 :fracture-energy 48d0
+                 :initiation-stress 3.4d6
+                 :critical-damage 1.000d0
+                 :local-length 5d-3
+                 :local-length-damaged 5d-3
                  ;; :local-length-damaged 0.01d0
                  :gravity -0.0d0
                  :gravity-axis (cl-mpm/utils:vector-from-list '(0d0 1d0 0d0))
@@ -213,10 +217,10 @@
              (when
                  (and
                   (> (magicl:tref (cl-mpm/particle:mp-position mp) 0 0)
-                     (+ (first offset) (* (first block-size) 0.40))
+                     (+ (first offset) (* (first block-size) 0.45))
                      )
                   (< (magicl:tref (cl-mpm/particle:mp-position mp) 0 0)
-                     (+ (first offset) (* (first block-size) 0.60))
+                     (+ (first offset) (* (first block-size) 0.55))
                      )
                   )
                dir
@@ -302,15 +306,15 @@
                                            '(nil 0 nil)))
                 ))))
 
-      (defparameter *floor-bc*
-        (cl-mpm/penalty::make-bc-penalty-point-normal
-         sim
-         (cl-mpm/utils:vector-from-list '(0d0 1d0 0d0))
-         (cl-mpm/utils:vector-from-list (list 00d0 (second offset) 0d0))
-         (* density 1d3)
-         0.0d0
-         ;; 1d1
-         ))
+      ;; (defparameter *floor-bc*
+      ;;   (cl-mpm/penalty::make-bc-penalty-point-normal
+      ;;    sim
+      ;;    (cl-mpm/utils:vector-from-list '(0d0 1d0 0d0))
+      ;;    (cl-mpm/utils:vector-from-list (list 00d0 (second offset) 0d0))
+      ;;    (* density 1d3)
+      ;;    0.0d0
+      ;;    ;; 1d1
+      ;;    ))
       (defparameter *initial-surface*
         (loop for mp across (cl-mpm:sim-mps sim)
               when (not (= 1 (cl-mpm/particle::mp-index mp)))
@@ -362,7 +366,6 @@
 
       sim)))
 
-
 (defparameter *sim* nil)
 (defparameter *run-sim* t)
 (defparameter *t* 0)
@@ -378,23 +381,25 @@
   ;;   (defparameter *sim* (setup-test-column '(16 16) '(8 8)  '(0 0) *refine* mps-per-dim)))
   ;; (defparameter *sim* (setup-test-column '(1 1 1) '(1 1 1) 1 1))
 
-  (let* ((mesh-size (/ 0.025 (* 4)))
+  (let* ((mesh-size (/ 0.010 (* 2.0)))
          (mps-per-cell 2)
-         (shelf-height 0.100d0)
-         (shelf-length 0.55d0)
+         (shelf-height 0.50d0)
+         (shelf-length (* shelf-height 4))
          ;; (shelf-length 0.225d0)
          (domain-length (+ shelf-length (* 5 mesh-size)))
          (offset (list
                   ;; 0d0
                   (* 2 mesh-size)
-                       (* shelf-height 1)))
+                  (* 4 mesh-size)
+                       ;; (* shelf-height 1)
+                       ))
          )
     (defparameter *sim*
-      (setup-test-column (list domain-length (+ mesh-size (* shelf-height 3)))
+      (setup-test-column (list domain-length (+ shelf-height (* mesh-size 8)))
                          (list shelf-length shelf-height)
                          offset
                          (/ 1d0 mesh-size) mps-per-cell))
-    (let ((cut-depth (* 0.5d0 100d-3))
+    (let ((cut-depth (* 0.4d0 shelf-height))
           (cut-width 2.5d-3))
       (cl-mpm/setup::remove-sdf
        *sim*
@@ -406,61 +411,18 @@
               )
         (list
          ;; 10.0d-3
-         10d-3
+         5d-3
+         ;; 1.33d-3
          ;; 10d-3
          ;; mesh-size
          cut-depth
          )))
-      ;; (cl-mpm/setup::damage-sdf
-      ;;  *sim*
-      ;;  (rectangle-sdf
-      ;;   (list
-      ;;    0d0
-      ;;                                   ;(+ (first offset) (* 0.5d0 shelf-length))
-      ;;    (+ (second offset) 0d0)
-      ;;    )
-      ;;   (list
-      ;;    ;; 3.0d-3
-      ;;    10d-3
-      ;;    1000d0
-      ;;    ))
-      ;;  0.9d0
-      ;;  )
       )
     (format t "Total weight ~F~%"
             (loop for mp across (cl-mpm:sim-mps *sim*)
                   sum (* 9.8d0 (cl-mpm/particle:mp-mass mp))))
 
     (defparameter *current-load* 0d0)
-    ;; (loop for mp across (cl-mpm:sim-mps *sim*)
-    ;;       do
-    ;;          (setf (cl-mpm/particle:mp-damage mp) (random 0.1d0)))
-    ;; (cl-mpm/setup::damage-sdf
-    ;;  *sim*
-    ;;  (lambda (p)
-    ;;    (cl-mpm/setup::line-sdf (magicl:from-list (list (magicl:tref p 0 0)
-    ;;                                                    (magicl:tref p 1 0))
-    ;;                                              '(2 1))
-    ;;                            (list (- shelf-length shelf-height) shelf-height)
-    ;;                            (list shelf-length soil-boundary)
-    ;;                            10d0
-    ;;                            )) 0.8d0)
-    ;(let ((sdf
-    ;        (lambda (p)
-    ;          (cl-mpm/setup::line-sdf (magicl:from-list (list (magicl:tref p 0 0)
-    ;                                                          (magicl:tref p 1 0))
-    ;                                                    '(2 1))
-    ;                                  (list (- shelf-length shelf-height) shelf-height)
-    ;                                  (list shelf-length 0d0)
-    ;                                  20d0
-    ;                                  ))
-    ;        ))
-    ;  (loop for mp across (cl-mpm:sim-mps *sim*)
-    ;        do (with-accessors ((pos cl-mpm/particle:mp-position)
-    ;                            (damage cl-mpm/particle:mp-damage)) mp
-    ;             (when (>= 0 (funcall sdf pos))
-    ;               (setf damage (min 1d0 (max 0d0 (coerce (* (funcall sdf pos) -0.1d0) 'double-float)))))
-    ;             )))
 
 
     )
@@ -520,9 +482,6 @@
                 while *run-sim*
                 do
                    (progn
-                     ;; (when (= steps 5)
-                     ;;   (setf (cl-mpm::sim-enable-damage *sim*) t)
-                     ;;   )
                      (format t "Step ~d ~%" steps)
                      (cl-mpm/output:save-vtk (merge-pathnames (format nil "output/sim_~5,'0d.vtk" *sim-step*)) *sim*)
                      (let ((average-force 0d0)
