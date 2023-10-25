@@ -129,8 +129,8 @@
                (mapcar (lambda (x) (* x e-scale)) size)
                #'cl-mpm/shape-function:make-shape-function-bspline
                ;; 'cl-mpm::mpm-sim-usf
-               'cl-mpm/damage::mpm-sim-damage
-               ;; 'cl-mpm/mpi::mpm-si
+               ;; 'cl-mpm/damage::mpm-sim-damage
+               'cl-mpm/mpi::mpm-sim-mpi-stress
                ))
          (h (cl-mpm/mesh:mesh-resolution (cl-mpm:sim-mesh sim)))
          (h-x (/ h 1d0))
@@ -197,7 +197,7 @@
                 )
                )))
       (setf (cl-mpm:sim-allow-mp-split sim) nil)
-      (setf (cl-mpm::sim-enable-damage sim) t)
+      (setf (cl-mpm::sim-enable-damage sim) nil)
       (setf (cl-mpm::sim-nonlocal-damage sim) t)
       (setf (cl-mpm::sim-allow-mp-damage-removal sim) nil)
       (setf (cl-mpm::sim-mp-damage-removal-instant sim) nil)
@@ -339,8 +339,12 @@
                                    )
                       sim
                     (let ((datum (* -1d0 (+ *initial-surface* *target-displacement*)))
-                          (normal (cl-mpm/utils:vector-from-list  '(0d0 -1d0 0d0))))
-                      (cl-mpm/penalty::apply-displacement-control-mps mesh (coerce *terminus-mps* 'vector )
+                          (normal (cl-mpm/utils:vector-from-list  '(0d0 -1d0 0d0)))
+                          (terminus-mps (loop for mp across (cl-mpm:sim-mps *sim*)
+                                              when (= (cl-mpm/particle::mp-index mp) 1)
+                                              collect mp))
+                          )
+                      (cl-mpm/penalty::apply-displacement-control-mps mesh (coerce terminus-mps 'vector )
                                                        dt
                                                        normal
                                                        datum
@@ -489,6 +493,10 @@
                            (average-reaction 0d0))
                        (time
                         (dotimes (i substeps);)
+                          (defparameter *terminusmps*
+                            (terminus-mps (loop for mp across (cl-mpm:sim-mps *sim*)
+                                                when (= (cl-mpm/particle::mp-index mp) 1)
+                                                  collect mp)))
                           (incf average-force (/
                                                (/ cl-mpm/penalty::*debug-force*
                                                   (max 1 cl-mpm/penalty::*debug-force-count*))
@@ -562,11 +570,122 @@
                      (swank.live:update-swank)
                      ))))
   (cl-mpm/output:save-vtk (merge-pathnames (format nil "output/sim_~5,'0d.vtk" *sim-step*)) *sim*))
+(defun mpi-loop ()
+  (setup)
+  (format t "Sim MPs: ~a~%" (length (cl-mpm:sim-mps *sim*)))
+  (format t "Decompose~%")
+  (cl-mpm/mpi::domain-decompose *sim*)
+  (format t "Sim MPs: ~a~%" (length (cl-mpm:sim-mps *sim*)))
+  )
+(defun run-mpi ()
+  (defparameter *data-force* '())
+  (defparameter *data-displacement* '(0d0))
+  (defparameter *data-load* '(0d0))
+  (defparameter *data-node-load* '(0d0))
+  (defparameter *data-mp-load* '(0d0))
+  (defparameter *data-time* '(0d0))
+  (defparameter *target-displacement* 0d0)
+  (defparameter *data-full-time* '(0d0))
+  (defparameter *data-full-load* '(0d0))
 
 
-(setf lparallel:*kernel* (lparallel:make-kernel 8 :name "custom-kernel"))
+  (let* ((target-time 1d0)
+         (dt (cl-mpm:sim-dt *sim*))
+         (substeps (floor target-time dt))
+         (dt-scale 1d0)
+         (disp-step -0.005d-3)
+         (rank (cl-mpi:mpi-comm-rank))
+         )
+
+    (when (= rank 0)
+      (cl-mpm/output:save-vtk-mesh (merge-pathnames "output/mesh.vtk")
+                                   *sim*)
+      (with-open-file (stream (merge-pathnames "output/disp.csv") :direction :output :if-exists :supersede)
+        (format stream "disp,load~%"))
+      )
+
+    (setf cl-mpm/penalty::*debug-force* 0d0)
+    (setf cl-mpm/penalty::*debug-force-count* 0d0)
+    (time (cl-mpm::update-sim *sim*))
+    (multiple-value-bind (dt-e substeps-e) (cl-mpm:calculate-adaptive-time *sim* target-time :dt-scale dt-scale)
+      (when (= rank 0)
+        (format t "CFL dt estimate: ~f~%" dt-e)
+        (format t "CFL step count estimate: ~D~%" substeps-e))
+      (setf substeps substeps-e))
+    (when (= rank 0)
+      (format t "Substeps ~D~%" substeps))
+    (incf *target-displacement* disp-step)
+    (time (loop for steps from 0 to 100
+                while *run-sim*
+                do
+                   (progn
+                     (when (= rank 0)
+                       (format t "Step ~d ~%" steps))
+                     (cl-mpm/output:save-vtk (merge-pathnames (format nil "output/sim_~5,'0d_~2,'0d.vtk" *sim-step* rank)) *sim*)
+                     (let ((average-force 0d0)
+                           (average-disp 0d0)
+                           (average-reaction 0d0))
+                       (time
+                        (dotimes (i substeps);)
+                          (incf average-force (/
+                                               (/ cl-mpm/penalty::*debug-force*
+                                                  (max 1 cl-mpm/penalty::*debug-force-count*))
+                                               substeps
+                                               ))
+                          (incf average-reaction
+                                (/ (get-reaction-force *fixed-nodes*) substeps)
+                                )
+                          (incf average-disp
+                                (/ (get-disp *terminus-mps*) substeps)
+                                )
+                          (incf average-reaction (/ (get-reaction-force *fixed-nodes*) substeps))
+                          (setf cl-mpm/penalty::*debug-force* 0d0)
+                          (setf cl-mpm/penalty::*debug-force-count* 0d0)
+                          (cl-mpm::update-sim *sim*)
+                          (incf *target-displacement* (/ disp-step substeps))
+                          (setf *t* (+ *t* (cl-mpm::sim-dt *sim*))))
+                        )
+                       ;; (incf *target-displacement* -0.01d-3)
+                       (push
+                        average-disp
+                        *data-displacement*)
+                       (push
+                        average-force
+                        *data-mp-load*)
+                       (push
+                        average-reaction
+                        *data-load*)
+
+                       (when (= rank 0)
+                         (with-open-file (stream (merge-pathnames "output/disp.csv") :direction :output :if-exists :append)
+                           (format stream "~f,~f~%"
+                                   average-disp
+                                   average-force
+                                   ))))
+
+
+                     (when (= rank 0)
+                       (format t "Target: ~f - Current: ~f Error: ~f - energy ~F~%"
+                               *target-displacement*
+                               (get-disp *terminus-mps*)
+                               (* 100d0 (/ (- *target-displacement* (get-disp *terminus-mps*)) *target-displacement*))
+                               (energy-norm *sim*)))
+                     (multiple-value-bind (dt-e substeps-e) (cl-mpm:calculate-adaptive-time *sim* target-time :dt-scale dt-scale)
+                       ;; (format t "CFL dt estimate: ~f~%" dt-e)
+                       ;; (format t "CFL step count estimate: ~D~%" substeps-e)
+                       (setf substeps substeps-e))
+                     (incf *sim-step*)
+                     (swank.live:update-swank)
+                     ))))
+  ;(cl-mpm/output:save-vtk (merge-pathnames (format nil "output/sim_~5,'0d.vtk" *sim-step*)) *sim*)
+  )
+
+
+(setf lparallel:*kernel* (lparallel:make-kernel 32 :name "custom-kernel"))
 (defparameter *run-sim* nil)
-(setup)
-(format t "MP count:~D~%" (length (cl-mpm:sim-mps *sim*)))
-(run)
+;(setup)
+;(format t "MP count:~D~%" (length (cl-mpm:sim-mps *sim*)))
+;(run)
+
+(mpi-loop)
 
