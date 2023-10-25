@@ -495,10 +495,6 @@
                            (average-reaction 0d0))
                        (time
                         (dotimes (i substeps);)
-                          (defparameter *terminus-mps*
-                            (loop for mp across (cl-mpm:sim-mps *sim*)
-                                                 when (= (cl-mpm/particle::mp-index mp) 1)
-                                                   collect mp))
                           (incf average-force (/
                                                (/ cl-mpm/penalty::*debug-force*
                                                   (max 1 cl-mpm/penalty::*debug-force-count*))
@@ -601,10 +597,13 @@
       (static-vectors:with-static-vector (dest 1 :element-type 'double-float :initial-element 0d0)
         (cl-mpi:mpi-allreduce source dest cl-mpi:+mpi-sum+)
         (setf sum (aref dest 0))
-        (setf (aref source 0) (coerce mp-count 'double-float ))
-        (cl-mpi:mpi-allreduce source dest cl-mpi:+mpi-sum+)
-        (setf sum (/ sum (aref dest 0)))
         ))
+    (static-vectors:with-static-vector (source 1 :element-type 'double-float :initial-element (coerce mp-count 'double-float))
+      (static-vectors:with-static-vector (dest 1 :element-type 'double-float :initial-element 0d0)
+        (cl-mpi:mpi-allreduce source dest cl-mpi:+mpi-sum+)
+        (setf sum (/ sum (min 1d0 (aref dest 0))))
+        ))
+
     sum))
 (defun run-mpi ()
   (defparameter *data-force* '())
@@ -658,6 +657,10 @@
                            (average-reaction 0d0))
                        (time
                         (dotimes (i substeps);)
+                          (defparameter *terminus-mps*
+                            (loop for mp across (cl-mpm:sim-mps *sim*)
+                                  when (= (cl-mpm/particle::mp-index mp) 1)
+                                    collect mp))
                           (incf average-force (/
                                                (/ cl-mpm/penalty::*debug-force*
                                                   (max 1 cl-mpm/penalty::*debug-force-count*))
