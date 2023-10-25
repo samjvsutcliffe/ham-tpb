@@ -1,7 +1,7 @@
-(restrict-compiler-policy 'speed 3 3)
-(restrict-compiler-policy 'debug 0 0)
-(restrict-compiler-policy 'safety 0 0)
-(setf *block-compile-default* t)
+(restrict-compiler-policy 'speed 0 0)
+(restrict-compiler-policy 'debug 3 3)
+(restrict-compiler-policy 'safety 3 3)
+;; (setf *block-compile-default* t)
 (setf *features* (delete :cl-mpm-pic *features*))
 (ql:quickload "magicl")
 (ql:quickload "cl-mpm")
@@ -67,13 +67,15 @@
 
 (defun get-disp (load-mps)
   ;; (* *t* *tip-velocity*)
-  (- (/ (loop for mp in load-mps
-              sum (+
-                   (magicl:tref (cl-mpm/particle::mp-position mp) 1 0)
-                   (* 0.5d0 (magicl:tref (cl-mpm/particle::mp-domain-size mp) 1 0))
-                   )) (length load-mps))
-     *initial-surface*
-     ))
+  (if (> (length load-mps) 0d0)
+    (- (/ (loop for mp in load-mps
+                sum (+
+                     (magicl:tref (cl-mpm/particle::mp-position mp) 1 0)
+                     (* 0.5d0 (magicl:tref (cl-mpm/particle::mp-domain-size mp) 1 0))
+                     )) (length load-mps))
+       *initial-surface*
+       )
+    0d0))
 
 (defun get-force-mps (sim load-mps)
   (with-accessors ((mps cl-mpm:sim-mps)
@@ -385,7 +387,7 @@
   ;;   (defparameter *sim* (setup-test-column '(16 16) '(8 8)  '(0 0) *refine* mps-per-dim)))
   ;; (defparameter *sim* (setup-test-column '(1 1 1) '(1 1 1) 1 1))
 
-  (let* ((mesh-size (/ 0.010 (* 2.0)))
+  (let* ((mesh-size (/ 0.010 (* 0.5)))
          (mps-per-cell 2)
          (shelf-height 0.50d0)
          (shelf-length (* shelf-height 4))
@@ -493,10 +495,10 @@
                            (average-reaction 0d0))
                        (time
                         (dotimes (i substeps);)
-                          (defparameter *terminusmps*
-                            (terminus-mps (loop for mp across (cl-mpm:sim-mps *sim*)
-                                                when (= (cl-mpm/particle::mp-index mp) 1)
-                                                  collect mp)))
+                          (defparameter *terminus-mps*
+                            (loop for mp across (cl-mpm:sim-mps *sim*)
+                                                 when (= (cl-mpm/particle::mp-index mp) 1)
+                                                   collect mp))
                           (incf average-force (/
                                                (/ cl-mpm/penalty::*debug-force*
                                                   (max 1 cl-mpm/penalty::*debug-force-count*))
@@ -571,11 +573,24 @@
                      ))))
   (cl-mpm/output:save-vtk (merge-pathnames (format nil "output/sim_~5,'0d.vtk" *sim-step*)) *sim*))
 (defun mpi-loop ()
-  (setup)
-  (format t "Sim MPs: ~a~%" (length (cl-mpm:sim-mps *sim*)))
-  (format t "Decompose~%")
-  (cl-mpm/mpi::domain-decompose *sim*)
-  (format t "Sim MPs: ~a~%" (length (cl-mpm:sim-mps *sim*)))
+  (let ((rank (cl-mpi:mpi-comm-rank)))
+    (setup)
+
+    (setf (cl-mpm/mpi::mpm-sim-mpi-domain-count *sim*) '(2 1 1))
+    (when (= rank 0)
+      (format t "Sim MPs: ~a~%" (length (cl-mpm:sim-mps *sim*)))
+      (format t "Decompose~%"))
+    (cl-mpm/mpi::domain-decompose *sim*)
+    (when (= rank 0)
+      (format t "Sim MPs: ~a~%" (length (cl-mpm:sim-mps *sim*))))
+    (when (= rank 0)
+      (format t "Run mpi~%"))
+    (time (cl-mpm::update-sim *sim*))
+    (when (= rank 0)
+      (format t "Done mpi~%"))
+    )
+  ;; (run-mpi)
+  (sb-ext:quit)
   )
 (defun run-mpi ()
   (defparameter *data-force* '())
@@ -606,6 +621,8 @@
 
     (setf cl-mpm/penalty::*debug-force* 0d0)
     (setf cl-mpm/penalty::*debug-force-count* 0d0)
+    (when (= rank 0)
+      (format t "Test run~%"))
     (time (cl-mpm::update-sim *sim*))
     (multiple-value-bind (dt-e substeps-e) (cl-mpm:calculate-adaptive-time *sim* target-time :dt-scale dt-scale)
       (when (= rank 0)
