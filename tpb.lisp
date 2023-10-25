@@ -574,6 +574,7 @@
   (cl-mpm/output:save-vtk (merge-pathnames (format nil "output/sim_~5,'0d.vtk" *sim-step*)) *sim*))
 (defun mpi-loop ()
   (let ((rank (cl-mpi:mpi-comm-rank)))
+    ;; (cl-mpi:mpi-init)
     (setup)
 
     (setf (cl-mpm/mpi::mpm-sim-mpi-domain-count *sim*) '(2 1 1))
@@ -590,6 +591,7 @@
       (format t "Done mpi~%"))
     )
   ;; (run-mpi)
+  (cl-mpi:mpi-finalize)
   (sb-ext:quit)
   )
 (defun run-mpi ()
