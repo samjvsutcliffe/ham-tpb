@@ -387,7 +387,7 @@
   ;;   (defparameter *sim* (setup-test-column '(16 16) '(8 8)  '(0 0) *refine* mps-per-dim)))
   ;; (defparameter *sim* (setup-test-column '(1 1 1) '(1 1 1) 1 1))
 
-  (let* ((mesh-size (/ 0.010 (* 0.5)))
+  (let* ((mesh-size (/ 0.010 (* 0.25)))
          (mps-per-cell 2)
          (shelf-height 0.50d0)
          (shelf-length (* shelf-height 4))
@@ -586,11 +586,12 @@
       (format t "Sim MPs: ~a~%" (length (cl-mpm:sim-mps *sim*))))
     (when (= rank 0)
       (format t "Run mpi~%"))
-    (time (cl-mpm::update-sim *sim*))
+    ;; (time (cl-mpm::update-sim *sim*))
+
+    (run-mpi)
     (when (= rank 0)
       (format t "Done mpi~%"))
     )
-  ;; (run-mpi)
   (cl-mpi:mpi-finalize)
   (sb-ext:quit)
   )
@@ -640,7 +641,7 @@
                    (progn
                      (when (= rank 0)
                        (format t "Step ~d ~%" steps))
-                     (cl-mpm/output:save-vtk (merge-pathnames (format nil "output/sim_~5,'0d_~2,'0d.vtk" *sim-step* rank)) *sim*)
+                     (cl-mpm/output:save-vtk (merge-pathnames (format nil "output/sim_~2,'0d_~5,'0d.vtk" rank *sim-step*)) *sim*)
                      (let ((average-force 0d0)
                            (average-disp 0d0)
                            (average-reaction 0d0))
