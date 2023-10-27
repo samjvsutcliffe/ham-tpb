@@ -132,7 +132,7 @@
                #'cl-mpm/shape-function:make-shape-function-bspline
                ;; 'cl-mpm::mpm-sim-usf
                ;; 'cl-mpm/damage::mpm-sim-damage
-               'cl-mpm/mpi::mpm-sim-mpi-stress
+               'cl-mpm/mpi::mpm-sim-mpi-nodes
                ))
          (h (cl-mpm/mesh:mesh-resolution (cl-mpm:sim-mesh sim)))
          (h-x (/ h 1d0))
@@ -387,7 +387,7 @@
   ;;   (defparameter *sim* (setup-test-column '(16 16) '(8 8)  '(0 0) *refine* mps-per-dim)))
   ;; (defparameter *sim* (setup-test-column '(1 1 1) '(1 1 1) 1 1))
 
-  (let* ((mesh-size (/ 0.010 (* 0.25)))
+  (let* ((mesh-size (/ 0.010 (* 2.00)))
          (mps-per-cell 2)
          (shelf-height 0.50d0)
          (shelf-length (* shelf-height 4))
@@ -477,6 +477,8 @@
     (setf cl-mpm/penalty::*debug-force* 0d0)
     (setf cl-mpm/penalty::*debug-force-count* 0d0)
     (time (cl-mpm::update-sim *sim*))
+
+    (format t "Calculating dt~%")
     (multiple-value-bind (dt-e substeps-e) (cl-mpm:calculate-adaptive-time *sim* target-time :dt-scale dt-scale)
                     (format t "CFL dt estimate: ~f~%" dt-e)
                     (format t "CFL step count estimate: ~D~%" substeps-e)
@@ -496,8 +498,7 @@
                        (time
                         (dotimes (i substeps);)
                           (incf average-force (/
-                                               (/ cl-mpm/penalty::*debug-force*
-                                                  (max 1 cl-mpm/penalty::*debug-force-count*))
+                                               cl-mpm/penalty::*debug-force*
                                                substeps
                                                ))
                           (incf average-reaction
@@ -517,9 +518,9 @@
                        (push
                         average-disp
                         *data-displacement*)
-                       (push
-                        average-force
-                        *data-mp-load*)
+                       ;; (push
+                       ;;  average-force
+                       ;;  *data-mp-load*)
                        (push
                         average-reaction
                         *data-load*)
@@ -573,7 +574,7 @@
     ;; (cl-mpi:mpi-init)
     (setup)
 
-    (setf (cl-mpm/mpi::mpm-sim-mpi-domain-count *sim*) '(2 1 1))
+    (setf (cl-mpm/mpi::mpm-sim-mpi-domain-count *sim*) (list (cl-mpi:mpi-comm-size) 1 1))
     (when (= rank 0)
       (format t "Sim MPs: ~a~%" (length (cl-mpm:sim-mps *sim*)))
       (format t "Decompose~%"))
@@ -582,7 +583,8 @@
       (format t "Sim MPs: ~a~%" (length (cl-mpm:sim-mps *sim*))))
     (when (= rank 0)
       (format t "Run mpi~%"))
-    ;; (time (cl-mpm::update-sim *sim*))
+    ;; (time (cl-mpm/mpi::mpi-sync-momentum *sim*))
+    ;(time (cl-mpm::update-sim *sim*))
 
     (run-mpi)
     (when (= rank 0)
@@ -617,26 +619,27 @@
   (defparameter *data-full-load* '(0d0))
 
 
-  (let* ((target-time 1d0)
+  (let* ((target-time 5d0)
          (dt (cl-mpm:sim-dt *sim*))
          (substeps (floor target-time dt))
          (dt-scale 1d0)
-         (disp-step -0.005d-3)
+         (disp-step -0.002d-3)
          (rank (cl-mpi:mpi-comm-rank))
          )
 
     (when (= rank 0)
-      (cl-mpm/output:save-vtk-mesh (merge-pathnames "output/mesh.vtk")
-                                   *sim*)
+      (format t "Outputting mesh and load-disp graph")
+      (cl-mpm/output:save-vtk-mesh (merge-pathnames "output/mesh.vtk") *sim*)
       (with-open-file (stream (merge-pathnames "output/disp.csv") :direction :output :if-exists :supersede)
-        (format stream "disp,load~%"))
-      )
+        (format stream "disp,load~%")))
 
     (setf cl-mpm/penalty::*debug-force* 0d0)
     (setf cl-mpm/penalty::*debug-force-count* 0d0)
     (when (= rank 0)
       (format t "Test run~%"))
     (time (cl-mpm::update-sim *sim*))
+    (when (= rank 0)
+      (format t "Caluclating dt estimate~%"))
     (multiple-value-bind (dt-e substeps-e) (cl-mpm:calculate-adaptive-time *sim* target-time :dt-scale dt-scale)
       (when (= rank 0)
         (format t "CFL dt estimate: ~f~%" dt-e)
@@ -662,8 +665,7 @@
                                   when (= (cl-mpm/particle::mp-index mp) 1)
                                     collect mp))
                           (incf average-force (/
-                                               (/ cl-mpm/penalty::*debug-force*
-                                                  (max 1 cl-mpm/penalty::*debug-force-count*))
+                                               cl-mpm/penalty::*debug-force*
                                                substeps
                                                ))
                           (incf average-reaction
@@ -687,9 +689,6 @@
                         *data-displacement*)
                        (push
                         average-force
-                        *data-mp-load*)
-                       (push
-                        average-reaction
                         *data-load*)
 
                        (when (= rank 0)
