@@ -1,11 +1,11 @@
-(restrict-compiler-policy 'speed 0 0)
-(restrict-compiler-policy 'debug 3 3)
-(restrict-compiler-policy 'safety 3 3)
-;; (setf *block-compile-default* t)
+(restrict-compiler-policy 'speed 3 3)
+(restrict-compiler-policy 'debug 0 0)
+(restrict-compiler-policy 'safety 0 0)
+(setf *block-compile-default* t)
 (setf *features* (delete :cl-mpm-pic *features*))
 (ql:quickload "magicl")
 (ql:quickload "cl-mpm")
-;(asdf:compile-system :cl-mpm :force T)
+(asdf:compile-system :cl-mpm :force T)
 (ql:quickload "cl-mpm/examples/tpb")
 (ql:quickload :cl-mpm/mpi)
 ;(asdf:compile-system :cl-mpm/examples/tpb :force T)
@@ -131,8 +131,8 @@
                (mapcar (lambda (x) (* x e-scale)) size)
                #'cl-mpm/shape-function:make-shape-function-bspline
                ;; 'cl-mpm::mpm-sim-usf
-               ;; 'cl-mpm/damage::mpm-sim-damage
-               'cl-mpm/mpi::mpm-sim-mpi-nodes
+               'cl-mpm/damage::mpm-sim-damage
+               ;'cl-mpm/mpi::mpm-sim-mpi-nodes
                ))
          (h (cl-mpm/mesh:mesh-resolution (cl-mpm:sim-mesh sim)))
          (h-x (/ h 1d0))
@@ -171,26 +171,21 @@
                 (cl-mpm/setup::make-block-mps-list
                  offset
                  block-size
-                 ;; (mapcar (lambda (e) (ceiling (* e e-scale mp-scale))) block-size)
                  (mapcar (lambda (e)
                            (round  (* e mp-scale) h-x)
-                           ;; (*
-                           ;;            ;; e e-scale mp-scale
-                           ;;            (ceiling (* e e-scale mp-scale)
-                           ;;                     (* e-scale mp-scale))
-                           ;;            (* e-scale mp-scale)
-                           ;;            )
                            ) block-size)
                  density
-                 'cl-mpm/particle::particle-concrete
-                 :E 15d9
+                 'cl-mpm/particle::particle-limestone
+                 :E 18.0d9
                  :nu 0.15d0
                  ;; :elastic-approxmation :
-                 :fracture-energy 48d0
+                 :fracture-energy (* 48d0 1.0)
                  :initiation-stress 3.4d6
                  :critical-damage 1.000d0
-                 :local-length 5d-3
-                 :local-length-damaged 5d-3
+                 :compression-ratio 8d0
+                 :internal-length 5.4d-3
+                 :local-length 5.4d-3
+                 :local-length-damaged 5.4d-3
                  ;; :local-length-damaged 0.01d0
                  :gravity -0.0d0
                  :gravity-axis (cl-mpm/utils:vector-from-list '(0d0 1d0 0d0))
@@ -199,12 +194,12 @@
                 )
                )))
       (setf (cl-mpm:sim-allow-mp-split sim) nil)
-      (setf (cl-mpm::sim-enable-damage sim) nil)
+      (setf (cl-mpm::sim-enable-damage sim) t)
       (setf (cl-mpm::sim-nonlocal-damage sim) t)
       (setf (cl-mpm::sim-allow-mp-damage-removal sim) nil)
       (setf (cl-mpm::sim-mp-damage-removal-instant sim) nil)
       (setf (cl-mpm::sim-mass-filter sim) 0d0)
-      (let ((ms 1d7))
+      (let ((ms 1d6))
         (setf (cl-mpm::sim-mass-scale sim) ms)
         (setf (cl-mpm:sim-damping-factor sim)
               (* 1d-3 density ms)
@@ -389,7 +384,7 @@
 
   (let* ((mesh-size (/ 0.010 (* 2.00)))
          (mps-per-cell 2)
-         (shelf-height 0.50d0)
+         (shelf-height 0.101d0)
          (shelf-length (* shelf-height 4))
          ;; (shelf-length 0.225d0)
          (domain-length (+ shelf-length (* 5 mesh-size)))
@@ -416,7 +411,7 @@
               (+ (second offset) 0d0)
               )
         (list
-         ;; 10.0d-3
+         ;10.0d-3
          5d-3
          ;; 1.33d-3
          ;; 10d-3
@@ -465,13 +460,15 @@
   (defparameter *data-full-load* '(0d0))
 
   (with-open-file (stream (merge-pathnames "output/disp.csv") :direction :output :if-exists :supersede)
-    (format stream "disp,load~%"))
+    (format stream "disp,load~%")
+    (format stream "~f,~f~%" 0d0 0d0)
+    )
 
-  (let* ((target-time 1d0)
+  (let* ((target-time 0.5d0)
          (dt (cl-mpm:sim-dt *sim*))
          (substeps (floor target-time dt))
          (dt-scale 1d0)
-         (disp-step -0.005d-3)
+         (disp-step -0.002d-3)
          )
 
     (setf cl-mpm/penalty::*debug-force* 0d0)
@@ -585,7 +582,9 @@
       (format t "Run mpi~%"))
     ;; (time (cl-mpm/mpi::mpi-sync-momentum *sim*))
     ;(time (cl-mpm::update-sim *sim*))
-
+    (if (= rank 0)
+        (time (cl-mpm::update-sim *sim*))
+        (cl-mpm::update-sim *sim*))
     (run-mpi)
     (when (= rank 0)
       (format t "Done mpi~%"))
@@ -619,7 +618,7 @@
   (defparameter *data-full-load* '(0d0))
 
 
-  (let* ((target-time 5d0)
+  (let* ((target-time 2d0)
          (dt (cl-mpm:sim-dt *sim*))
          (substeps (floor target-time dt))
          (dt-scale 1d0)
@@ -631,13 +630,15 @@
       (format t "Outputting mesh and load-disp graph")
       (cl-mpm/output:save-vtk-mesh (merge-pathnames "output/mesh.vtk") *sim*)
       (with-open-file (stream (merge-pathnames "output/disp.csv") :direction :output :if-exists :supersede)
-        (format stream "disp,load~%")))
+        (format stream "disp,load~%")
+        (format stream "~f,~f~%" 0d0 0d0)
+        ))
 
     (setf cl-mpm/penalty::*debug-force* 0d0)
     (setf cl-mpm/penalty::*debug-force-count* 0d0)
     (when (= rank 0)
       (format t "Test run~%"))
-    (time (cl-mpm::update-sim *sim*))
+    (cl-mpm::update-sim *sim*)
     (when (= rank 0)
       (format t "Caluclating dt estimate~%"))
     (multiple-value-bind (dt-e substeps-e) (cl-mpm:calculate-adaptive-time *sim* target-time :dt-scale dt-scale)
@@ -718,9 +719,9 @@
 
 (setf lparallel:*kernel* (lparallel:make-kernel 32 :name "custom-kernel"))
 (defparameter *run-sim* nil)
-;(setup)
-;(format t "MP count:~D~%" (length (cl-mpm:sim-mps *sim*)))
-;(run)
+(setup)
+(format t "MP count:~D~%" (length (cl-mpm:sim-mps *sim*)))
+(run)
 
-(mpi-loop)
+;(mpi-loop)
 
