@@ -16,4 +16,6 @@
 *.wx64fsl
 *.wx32fsl
 
-output/*
+output-*/
+slurm*
+mpi-worker

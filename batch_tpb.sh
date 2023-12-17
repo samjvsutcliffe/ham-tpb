@@ -12,4 +12,4 @@ module load aocl
 echo "Running code"
 rm output/*
 
-sbcl --dynamic-space-size 64000  --disable-debugger --load "template.lisp" --quit
+sbcl --dynamic-space-size 64000  --disable-debugger --load "tpb.lisp" --quit
