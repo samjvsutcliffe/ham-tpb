@@ -4,6 +4,10 @@
 ;(setf *block-compile-default* t)
 ;(setf *features* (delete :cl-mpm-pic *features*))
 (in-package :cl-mpm/examples/tpb)
+(setf *load-verbose* nil)
+(setf *load-print* nil)
+(setf *compile-verbose* nil)
+(setf *compile-print* nil)
 
 (defun rectangle-sdf (position size)
   (lambda (pos)
@@ -156,8 +160,8 @@
                            ) block-size)
                  density
                  'cl-mpm/particle::particle-limestone
-                 ;:E 15.3d9
-                 :E 18d9
+                 :E 15.3d9
+                 ;:E 18d9
                  :nu 0.15d0
                  ;; :elastic-approxmation :
                  :fracture-energy (* 48d0 1d0)
@@ -184,7 +188,7 @@
       (let ((ms 1d0))
         (setf (cl-mpm::sim-mass-scale sim) ms)
         (setf (cl-mpm:sim-damping-factor sim)
-              (* 1d1 density ms)
+              (* 1d-1 density ms)
               ;; 1d0
               ))
 
@@ -205,7 +209,7 @@
                dir
                )))))
 
-      (let ((dt-scale 1d0))
+      (let ((dt-scale 0.5d0))
         (setf
          (cl-mpm:sim-dt sim)
          (* dt-scale h
@@ -578,7 +582,7 @@
     (setup kappa lc refine)
     
     ;;Domain
-    (setf (cl-mpm/mpi::mpm-sim-mpi-domain-count *sim*) (list (floor (cl-mpi:mpi-comm-size) 4) 4 1))
+    (setf (cl-mpm/mpi::mpm-sim-mpi-domain-count *sim*) (list (floor (cl-mpi:mpi-comm-size) 1) 1 1))
     (let ((dhalo-size (* 4 (cl-mpm/particle::mp-local-length (aref (cl-mpm:sim-mps *sim*) 0)))))
 	    (setf (cl-mpm/mpi::mpm-sim-mpi-halo-damage-size *sim*) dhalo-size))
     (when (= rank 0)
@@ -712,8 +716,8 @@
                         (setf *t* (+ *t* (cl-mpm::sim-dt *sim*))))
                       )
                     ;; (incf *target-displacement* -0.01d-3)
-                    (setf average-disp (mpi-average average-disp (length *terminus-mps*)))
-                    (setf average-force (mpi-average average-force (length *terminus-mps*)))
+                    (setf average-disp (cl-mpm/mpi::mpi-average average-disp (length *terminus-mps*)))
+                    (setf average-force (cl-mpm/mpi::mpi-average average-force (length *terminus-mps*)))
                     (push
                       average-disp
                       *data-displacement*)
@@ -751,11 +755,13 @@
 (defun converge-quasi-static-mpi (sim)
   (let* ((fnorm 0d0)
         (oobf 0d0)
-        ;; (estimated-t 0.5d0)
-        ;; (substeps (floor estimated-t (cl-mpm:sim-dt sim)))
-         (substeps 100)
+        (rank (cl-mpi:mpi-comm-rank))
+        (estimated-t 1d-4)
+        (dt-scale 0.5d0)
+        (substeps (floor estimated-t (cl-mpm:sim-dt sim)))
+         ;(substeps 100)
         (converged nil))
-    (when (= (cl-mpi:mpi-comm-rank) 0)
+    (when (= rank 0)
       (format t "Substeps ~D~%" substeps))
     (loop for i from 0 to 100
           while (and *run-sim*
@@ -768,10 +774,13 @@
                          when (= (cl-mpm/particle::mp-index mp) 1)
                            collect mp))
                  (setf cl-mpm/penalty::*debug-force* 0d0)
-                 (cl-mpm:update-sim sim))
-               (format t "Rank ~D - reaction ~E~%" (cl-mpi:mpi-comm-rank) (get-reaction-force *fixed-nodes*))
-               (format t "Rank ~D - force ~E~%" (cl-mpi:mpi-comm-rank) cl-mpm/penalty::*debug-force*)
-               (let ((reaction (cl-mpm/mpi::mpi-sum (get-reaction-force *fixed-nodes*)))
+                (cl-mpm:update-sim sim))
+               (multiple-value-bind (dt-e substeps-e) (cl-mpm:calculate-adaptive-time sim estimated-t :dt-scale dt-scale)
+                 (when (= rank 0)
+                   (format t "CFL dt estimate: ~f~%" dt-e)
+                   (format t "CFL step count estimate: ~D~%" substeps-e))
+                 (setf substeps substeps-e))
+               (let ((reaction (cl-mpm/mpi::mpi-average (get-reaction-force *fixed-nodes*) (count-if #'cl-mpm/mesh::node-active *fixed-nodes*)))
                      (penalty (cl-mpm/mpi::mpi-sum cl-mpm/penalty::*debug-force*)))
                  (when (= (cl-mpi:mpi-comm-rank) 0)
                    (format t "Conv step ~D - KE norm: ~E - OOBF: ~E - P: ~E R: ~E~%" i fnorm oobf penalty reaction))
@@ -838,18 +847,19 @@
                         (average-reaction 0d0))
                     (time
                      (progn
-                       (setf (cl-mpm::sim-enable-damage *sim*) t)
-                       (setf cl-mpm/damage::*delocal-counter-max* 0)
-                       (setf cl-mpm/penalty::*debug-force* 0d0)
-                       (cl-mpm::update-sim *sim*)
+                       ;(setf (cl-mpm::sim-enable-damage *sim*) t)
+                       ;(setf cl-mpm/damage::*delocal-counter-max* 0)
+                       ;(setf cl-mpm/penalty::*debug-force* 0d0)
+                       ;(cl-mpm::update-sim *sim*)
                        (setf (cl-mpm::sim-enable-damage *sim*) nil)
                        (incf *target-displacement* disp-step)
                        (converge-quasi-static-mpi *sim*)
+                       (cl-mpm/damage::calculate-damage *sim*)
                        ))
                     ;; (incf *target-displacement* -0.01d-3)
-                    (setf average-disp (mpi-average average-disp (length *terminus-mps*)))
-                    (setf average-force (mpi-average average-force (length *terminus-mps*)))
-                    (setf average-reaction (mpi-average average-reaction (length *fixed-nodes*)))
+                    (setf average-disp (cl-mpm/mpi::mpi-sum (get-disp *terminus-mps*)))
+                    (setf average-force (cl-mpm/mpi::mpi-sum (* cl-mpm/penalty::*debug-force* 2d0)))
+                    (setf average-reaction (cl-mpm/mpi::mpi-average (* (get-reaction-force *fixed-nodes*) 2d0) (count-if #'cl-mpm/mesh::node-active *fixed-nodes*)))
                     (push
                      average-disp
                      *data-displacement*)
