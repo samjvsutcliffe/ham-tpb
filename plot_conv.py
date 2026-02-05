@@ -1,38 +1,84 @@
-import matplotlib.pyplot as plt
+import matplotlib as mpl
 import pandas as pd
-import os
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from matplotlib.patches import Rectangle
+from matplotlib.collections import PatchCollection
+from matplotlib import cm
 import re
-from scipy import integrate
-def calculate_gf(disp,load):
-    return integrate.trapz(load,disp)/(0.102*0.6*13e-3)
+import os
+import json
+import numpy as np
+import pandas as pd
+import json
+import sys
+from vtk import vtkUnstructuredGridReader
+from vtk.util import numpy_support as VN
+from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from matplotlib.patches import Rectangle
+from matplotlib.collections import PatchCollection
+from matplotlib import cm
+from multiprocessing import Pool
 
 
-#folders = os.listdir("./output")
-#folders = list(filter(os.path.isdir,os.listdir("./")))
-regex = re.compile(r'output-.*')
-folders = list(filter(regex.search,os.listdir("./")))
-#folders = [
-#        "output-1.0-1.0-1.0",
-#        "output-2.0-1.0-1.0",
-#        "output-4.0-1.0-1.0"]
-##print("Folders:",folders)
+
+top_dir = "./vtk_data/"
+output_regex = re.compile("output-*")
+output_list = list(filter(output_regex.match,os.listdir(top_dir)))
+output_list.sort()
+if len(output_list) > 1:
+    for i,out in enumerate(output_list):
+        print("{}: {}".format(i,out))
+    output_dir = "{}./{}/".format(top_dir,output_list[int(input())])
+else:
+    output_dir = "{}./{}/".format(top_dir,output_list[0])
 
 
+df = pd.read_csv(output_dir+"conv.csv")
 
-data_ref = pd.read_csv("load-disp.csv")
-plt.plot(data_ref["disp"],data_ref["load"],label="Data")
-print("GF experimental:",calculate_gf(1e-3*data_ref["disp"],data_ref["load"]))
-#files = os.listdir("conv")
+sub_steps = 1
+iters = df["iter"].values * sub_steps
+step = df["step"].values
+oobf = df["oobf"].values
+energy = df["energy"].values
+plastic = df["plastic"].values
+plastic = plastic / np.max(plastic)
+damage = df["damage"].values
+damage = damage / np.max(damage)
+fig = plt.figure()
+ax = fig.gca()
+# ax.plot(iters,oobf,label="OOBF")
+# ax.plot(iters,energy,label="Energy")
+ax.plot(iters,oobf,label="Residual")
+# ax.plot(iters,energy,label="Deformation")
 
-for i in folders:
-    mpm = pd.read_csv("./{}/disp.csv".format(i))
-    plt.plot(-1e3*mpm["disp"],2*13e-3*mpm["load"],label="MPM-{}".format(i))
-    #plt.plot(-1e3*mpm["disp"],13e-3*mpm["nload"],label="MPM-{}-reaction".format(i))
-    #plt.plot(-1e3*mpm["disp"],13e-3*0.5*(mpm["load"]+mpm["nload"]),label="MPM-{}-average".format(i))
-    print("GF ",i," :",calculate_gf(-1*mpm["disp"],13e-3*mpm["load"]))
-plt.xlabel("Displacement (mm)")
-plt.ylabel("Load (N)")
-plt.title("Vary h")
-plt.legend()
-#plt.savefig("test.png")
+thresh_scale = 1e-2
+thresh_scale_damage = 1e-3
+ax.axhline(thresh_scale,c="green",ls="--")
+# ax.set_ylim(bottom=0,top=thresh_scale_damage*2)
+ax.set_xlabel("Iterations")
+ax.set_ylabel("Convergence criteria")
+ax.set_yscale("log")
+# ax.set_yscale("log")
+ax_damage = ax.twinx()
+ax_damage.scatter(iters,damage,label="Damage",c="red")
+ax_damage.plot(iters,plastic,label="Plastic",c="black")
+ax_damage.set_ylim(bottom=0)
+ax_damage.set_ylabel("Plastic strain evolution")
+
+offset = 1
+for i in range(len(df)-1):
+    if step[i] != step[i+1]:
+        ##Transition found
+        x = iters[i+1]
+        ax.axvline(x,color="black")
+        ax.text(x+offset,-0.30,'Step {}'.format(step[i+1]),rotation=90)
+
+lines, labels = ax.get_legend_handles_labels()
+lines2, labels2 = ax_damage.get_legend_handles_labels()
+ax_damage.legend(lines + lines2, labels + labels2, loc=0)
+plt.tight_layout()
 plt.show()
