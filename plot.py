@@ -19,7 +19,7 @@ data = pd.read_csv("load-disp.csv")
 mpm = pd.read_csv(output_dir+"disp.csv")
 
 plt.plot(data["disp"].values ,data["load"].values,label="Data")
-plt.plot(-1e3*mpm["disp"].values,.5* 0.013*mpm["load"].values,label="MPM")
+plt.plot(-1e3*mpm["disp"].values,0.013*mpm["load"].values,label="MPM")
 
 plt.legend()
 plt.show()

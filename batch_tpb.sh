@@ -1,15 +1,19 @@
 #!/bin/bash
 
 # Request resources:
-#SBATCH -c 32     # 1 entire node
 #SBATCH --time=12:00:0  # 6 hours (hours:minutes:seconds)
-#SBATCH --mem=64G      # 1 GB RAM
 #SBATCH -p shared
+#SBATCH -n 1                    # number of MPI ranks
+#SBATCH --cpus-per-task=16   # number of MPI ranks per CPU socket
+#SBATCH --mem-per-cpu=1G
 
-module load gcc
-module load aocl
+module load aocc/5.0.0
+module load aocl/5.0.0
+export MV2_ENABLE_AFFINITY=0
 
 echo "Running code"
-rm output/*
+rm vtk_data/output/*
 
-sbcl --dynamic-space-size 64000  --disable-debugger --load "tpb.lisp" --quit
+export REFINE=2
+
+sbcl --dynamic-space-size 16000  --disable-debugger --load "tpb.lisp" --quit
